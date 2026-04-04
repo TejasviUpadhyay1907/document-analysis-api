@@ -1,0 +1,11 @@
+# Required: Secret API key for x-api-key header authentication
+API_KEY=sk_track2_123456
+
+# Optional: Full path to Tesseract binary (required on Windows)
+# TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+
+# Optional: OpenRouter LLM integration
+# Get a free key at https://openrouter.ai
+# Leave blank to use rule-based analysis automatically
+OPENROUTER_API_KEY=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
+OPENROUTER_MODEL=arcee-ai/trinity-mini:free

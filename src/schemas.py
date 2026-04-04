@@ -79,10 +79,10 @@ class DocumentAnalyzeResponse(BaseModel):
         description="Generic extracted entities",
     )
 
-    sentiment: Literal["positive", "neutral", "negative"] = Field(
-        default="neutral",
+    sentiment: Literal["Positive", "Neutral", "Negative"] = Field(
+        default="Neutral",
         description="Overall sentiment of the document",
-        example="neutral",
+        example="Neutral",
     )
 
     documentData: Dict[str, Any] = Field(

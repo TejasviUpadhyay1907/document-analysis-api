@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: document-analysis-api
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt &&
+      python -m spacy download en_core_web_sm
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: arcee-ai/trinity-mini:free
+      - key: PYTHON_VERSION
+        value: 3.11.9

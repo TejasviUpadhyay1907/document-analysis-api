@@ -3,12 +3,11 @@ llm_analyzer.py
 ---------------
 LLM-powered document analysis via OpenRouter.
 
-This module sends extracted text to an LLM with a strict system prompt and
-parses the returned JSON into:
-- documentType
-- summary
-- entities
-- documentData
+Returns:
+- normalized structured result on success
+- None on failure, weak output, or invalid output
+
+Fallback is handled in main.py.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -26,10 +24,12 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-_MAX_TEXT_CHARS = 6000
-_TIMEOUT_SECONDS = 6
+_MAX_TEXT_CHARS = 4000   # reduced to speed up LLM response
+_TIMEOUT_SECONDS = 15    # reduced from 30 — fail fast, use rule-based fallback
+_MAX_RETRIES = 1         # reduced from 3 — one attempt only, then fallback
 
 _ALLOWED_DOC_TYPES = {"resume", "invoice", "incident_report", "article", "general"}
+_ALLOWED_SENTIMENTS = {"positive", "neutral", "negative"}
 
 _SYSTEM_PROMPT = """
 You are an advanced AI Document Intelligence Engine.
@@ -49,7 +49,8 @@ TASKS:
 1. Identify the correct document type
 2. Generate a professional summary
 3. Extract clean entities
-4. Extract document-specific structured data
+4. Determine overall sentiment
+5. Extract document-specific structured data
 
 DOCUMENT TYPE:
 Classify into EXACTLY one of:
@@ -73,33 +74,30 @@ SUMMARY RULES:
 - Do NOT include emails, phone numbers, or URLs
 - Explain what the document is about
 - Avoid repeating titles
+- Do not infer completed qualifications if the document shows an ongoing degree or future graduation year
+- For ongoing education, describe the person as a student, not a graduate
 
 ENTITY EXTRACTION RULES:
-- names: real human names only, usually 2-3 words
+- names: real human names only, usually 2-4 words
 - organizations: real companies, institutions, agencies
-- Company names like Google, Microsoft, NVIDIA must be classified under "organizations", not "names"
-- dates: meaningful dates/time references
+- dates: meaningful dates or years
 - amounts: monetary values
 - emails: valid email addresses present in text
 - phones: valid phone numbers present in text
-- Exclude headings, random words, long sentences, and skills misclassified as names or organizations
+- Exclude headings, random words, long sentences, skills misclassified as names or organizations, and OCR junk
 - Only include entities clearly present in the text
-- Do not infer qualifications or status not explicitly stated. For example, if a resume shows an ongoing degree, describe the person as a student, not a graduate.
 
 PHONE NUMBER RULES:
-- Preserve the original phone number format if valid
-- If country code is present, ensure it is prefixed with '+'
-- If no country code is present, return the number as-is without guessing
-- Remove obvious formatting noise (extra spaces, symbols)
-- Do NOT assume country or add incorrect prefixes
+- Preserve valid phone numbers
+- If a country code is clearly present without '+', you may normalize it by adding '+'
+- Do not guess missing country codes
+- Remove obvious formatting noise
 
 SENTIMENT RULES:
-- Determine overall sentiment of the document
-- Output must be EXACTLY one of:
-  "positive", "neutral", or "negative"
-- Informational documents are usually "neutral"
-- Incident reports are usually "negative"
-- If unsure, return "neutral"
+- Return EXACTLY one of: "positive", "neutral", "negative"
+- Informational documents like articles, resumes, invoices, and factual reports are usually "neutral"
+- Incident reports describing breaches, failures, or attacks are often "negative"
+- If unclear, return "neutral"
 
 DOCUMENT-SPECIFIC DATA:
 If documentType is "resume":
@@ -171,7 +169,6 @@ def _truncate_text(text: str) -> str:
 
 def _extract_json(content: str) -> dict[str, Any]:
     content = content.strip()
-
     content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.IGNORECASE)
     content = re.sub(r"\s*```$", "", content)
 
@@ -196,7 +193,7 @@ def _safe_list(value: Any) -> list[str]:
 
     for item in value:
         if isinstance(item, str):
-            cleaned = item.strip()
+            cleaned = re.sub(r"\s+", " ", item).strip(" ,.;:-")
             key = cleaned.lower()
             if cleaned and key not in seen:
                 seen.add(key)
@@ -210,28 +207,29 @@ def _normalize_phone(phone: str) -> str:
     digits = re.sub(r"\D", "", phone)
 
     if not digits:
-        return phone.strip()
+        return phone
 
-    # If already has '+'
-    if phone.startswith("+"):
-        return f"+{digits}"
+    if len(digits) == 10:
+        return digits
 
-    # Detect India-style number (very common case)
     if len(digits) == 12 and digits.startswith("91"):
         return f"+{digits}"
 
-    # Keep 10-digit numbers as-is
-    if len(digits) == 10:
-        return digits
+    if phone.startswith("+"):
+        return f"+{digits}"
 
     return digits
 
 
 def _normalize_phones(values: list[str]) -> list[str]:
-    cleaned = []
-    seen = set()
+    cleaned: list[str] = []
+    seen: set[str] = set()
 
     for value in values:
+        digits = re.sub(r"\D", "", value)
+        if not (10 <= len(digits) <= 13):
+            continue
+
         normalized = _normalize_phone(value)
         key = normalized.lower()
         if normalized and key not in seen:
@@ -246,8 +244,6 @@ def _has_ongoing_education(document_data: dict[str, Any]) -> bool:
     if not isinstance(education, list):
         return False
 
-    current_year = datetime.now().year
-
     for item in education:
         text = ""
         if isinstance(item, dict):
@@ -255,13 +251,11 @@ def _has_ongoing_education(document_data: dict[str, Any]) -> bool:
         elif isinstance(item, str):
             text = item
 
-        if not text:
-            continue
-
         match = re.search(r"(20\d{2})\s*[-–—]\s*(20\d{2})", text)
         if match:
+            start_year = int(match.group(1))
             end_year = int(match.group(2))
-            if end_year >= current_year:
+            if end_year >= start_year:
                 return True
 
     return False
@@ -289,6 +283,10 @@ def _normalize_response(data: dict[str, Any]) -> dict[str, Any]:
     if document_type not in _ALLOWED_DOC_TYPES:
         document_type = "general"
 
+    sentiment = str(data.get("sentiment", "neutral")).strip().lower()
+    if sentiment not in _ALLOWED_SENTIMENTS:
+        sentiment = "neutral"
+
     document_data = data.get("documentData", {})
     if not isinstance(document_data, dict):
         document_data = {}
@@ -296,10 +294,6 @@ def _normalize_response(data: dict[str, Any]) -> dict[str, Any]:
     summary = str(data.get("summary", "")).strip()
     summary = _fix_resume_summary(summary, document_type, document_data)
     summary = re.sub(r"\s+", " ", summary).strip()
-
-    sentiment = str(data.get("sentiment", "neutral")).strip().lower()
-    if sentiment not in {"positive", "neutral", "negative"}:
-        sentiment = "neutral"
 
     return {
         "documentType": document_type,
@@ -317,18 +311,45 @@ def _normalize_response(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _call_openrouter(payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    last_error: Exception | None = None
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
+                response = client.post(_OPENROUTER_URL, json=payload, headers=headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as exc:
+            last_error = exc
+            logger.warning("OpenRouter attempt %s failed: %s", attempt + 1, exc)
+
+    raise RuntimeError(f"All OpenRouter attempts failed: {last_error}")
+
+
 def analyze_with_llm(text: str) -> dict[str, Any] | None:
-    api_key = getattr(settings, "openrouter_api_key", "").strip()
-    model = getattr(settings, "openrouter_model", "").strip() or "arcee-ai/trinity-mini:free"
+    api_key = getattr(settings, "openrouter_api_key", "").strip() if getattr(settings, "openrouter_api_key", None) else ""
+    model = getattr(settings, "openrouter_model", "").strip() if getattr(settings, "openrouter_model", None) else ""
+    model = model or "arcee-ai/trinity-mini:free"
+
+    if not text or not text.strip():
+        return None
 
     if not api_key:
+        logger.debug("OPENROUTER_API_KEY not set; skipping LLM analysis.")
         return None
 
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": _truncate_text(text)},
+            {
+                "role": "user",
+                "content": (
+                    "Analyze the following extracted document text and return only the required JSON.\n\n"
+                    f"{_truncate_text(text)}"
+                ),
+            },
         ],
         "temperature": 0.1,
         "max_tokens": 1200,
@@ -342,14 +363,24 @@ def analyze_with_llm(text: str) -> dict[str, Any] | None:
     }
 
     try:
-        with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
-            response = client.post(_OPENROUTER_URL, json=payload, headers=headers)
-            response.raise_for_status()
-
-        content = response.json()["choices"][0]["message"]["content"]
+        result = _call_openrouter(payload, headers)
+        content = result["choices"][0]["message"]["content"]
         parsed = _extract_json(content)
-        return _normalize_response(parsed)
+        normalized = _normalize_response(parsed)
 
-    except Exception as e:
-        logger.warning(f"LLM failed: {e}")
-        return None
+        if not normalized["summary"].strip():
+            logger.warning("LLM returned empty summary; using fallback instead.")
+            return None
+
+        return normalized
+
+    except httpx.HTTPStatusError as exc:
+        logger.warning("OpenRouter HTTP error %s: %s", exc.response.status_code, exc.response.text[:300])
+    except httpx.RequestError as exc:
+        logger.warning("OpenRouter request failed: %s", exc)
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+        logger.warning("OpenRouter response parse failed: %s", exc)
+    except Exception as exc:
+        logger.warning("LLM analysis unexpected error: %s", exc)
+
+    return None

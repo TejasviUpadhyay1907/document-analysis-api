@@ -1,0 +1,14 @@
+.env
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+test_files/
+test_runner.py
+encode_file.py
+runtime.txt
+build.sh
+README.md

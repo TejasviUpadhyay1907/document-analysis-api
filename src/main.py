@@ -1,4 +1,6 @@
 ﻿import logging
+import shutil
+import subprocess
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -34,7 +36,7 @@ app = FastAPI(
 
 # Serve frontend static files
 if _FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(_FRONTEND_DIR)), name="static")
+    pass
 
 
 @app.get("/ui", include_in_schema=False)
@@ -45,10 +47,26 @@ async def serve_ui():
 
 @app.get("/")
 async def health_check():
+    # Check if tesseract binary is actually available
+    tesseract_path = shutil.which("tesseract")
+    tesseract_version = None
+    if tesseract_path:
+        try:
+            result = subprocess.run(
+                ["tesseract", "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            tesseract_version = result.stdout.splitlines()[0] if result.stdout else result.stderr.splitlines()[0]
+        except Exception:
+            pass
+
     return {
         "status": "ok",
         "message": "AI Document Analysis API is running.",
         "version": "4.0.2",
+        "tesseract_installed": tesseract_path is not None,
+        "tesseract_path": tesseract_path,
+        "tesseract_version": tesseract_version,
     }
 
 

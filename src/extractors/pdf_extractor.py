@@ -1,14 +1,34 @@
 import io
+import os
+import platform
+import shutil
 import fitz
 import pytesseract
 from fastapi import HTTPException, status
 from PIL import Image
 
-# 🔥 IMPORTANT for Windows
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+def _configure_tesseract_for_pdf() -> None:
+    """Set tesseract path correctly for the current platform."""
+    cmd = os.getenv("TESSERACT_CMD")
+    if cmd:
+        pytesseract.pytesseract.tesseract_cmd = cmd
+        return
+    if platform.system() != "Windows":
+        found = shutil.which("tesseract")
+        if found:
+            pytesseract.pytesseract.tesseract_cmd = found
+            return
+        for path in ["/usr/bin/tesseract", "/usr/local/bin/tesseract"]:
+            if os.path.isfile(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                return
+    else:
+        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 
 def _ocr_page(page: fitz.Page) -> str:
+    _configure_tesseract_for_pdf()
     pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
     image_bytes = pix.tobytes("png")
     image = Image.open(io.BytesIO(image_bytes))

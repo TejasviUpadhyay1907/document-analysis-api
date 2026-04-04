@@ -234,7 +234,7 @@ def _extract_spacy(text: str):
         return _fallback_names(text), _fallback_orgs(text)
 
     try:
-        doc = _nlp(text[:100000])
+        doc = _nlp(text[:5000])  # cap at 5000 chars to keep spaCy fast on Render
         names: list[str] = []
         orgs: list[str] = []
 

@@ -24,9 +24,9 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-_MAX_TEXT_CHARS = 4000   # reduced to speed up LLM response
-_TIMEOUT_SECONDS = 15    # reduced from 30 — fail fast, use rule-based fallback
-_MAX_RETRIES = 1         # reduced from 3 — one attempt only, then fallback
+_MAX_TEXT_CHARS = 3000   # reduced further to speed up both LLM and spaCy
+_TIMEOUT_SECONDS = 12    # tight timeout — fail fast, use rule-based fallback
+_MAX_RETRIES = 1         # one attempt only
 
 _ALLOWED_DOC_TYPES = {"resume", "invoice", "incident_report", "article", "general"}
 _ALLOWED_SENTIMENTS = {"positive", "neutral", "negative"}

@@ -2,6 +2,16 @@
 
 An intelligent document processing API that accepts PDF, DOCX, and image files, extracts text, and returns structured JSON containing a summary, named entities, sentiment classification, and document-type-specific structured data.
 
+## 🚀 Live Demo
+
+| | Link |
+|--|------|
+| **Live API** | https://document-analysis-api-docker.onrender.com |
+| **Swagger UI (Test Here)** | https://document-analysis-api-docker.onrender.com/docs |
+| **API Endpoint** | `POST https://document-analysis-api-docker.onrender.com/api/document-analyze` |
+
+> Note: Free tier — first request may take 30-60 seconds to wake up.
+
 ---
 
 ## Description

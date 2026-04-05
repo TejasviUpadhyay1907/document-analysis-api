@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -58,6 +58,14 @@ async def health_check():
         "tesseract_path": tesseract_path,
         "tesseract_version": tesseract_version,
     }
+
+
+@app.post("/", include_in_schema=False)
+async def root_post(request: DocumentAnalyzeRequest, x_api_key: str = Header(..., alias="x-api-key")):
+    """Root POST handler — redirects to main endpoint for compatibility."""
+    if x_api_key != settings.api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key.")
+    return await document_analyze(request)
 
 
 def _extract_by_file_type(file_type: str, file_bytes: bytes) -> str:

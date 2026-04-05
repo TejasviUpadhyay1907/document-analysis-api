@@ -73,6 +73,25 @@ def _extract_by_file_type(file_type: str, file_bytes: bytes) -> str:
     )
 
 
+@app.get(
+    "/api/document-analyze",
+    include_in_schema=False,
+)
+async def document_analyze_info():
+    """GET handler for endpoint validation by hackathon testers."""
+    return {
+        "endpoint": "/api/document-analyze",
+        "method": "POST",
+        "description": "AI-Powered Document Analysis & Extraction API",
+        "required_headers": {"x-api-key": "your_api_key"},
+        "required_body": {
+            "fileName": "string",
+            "fileType": "pdf | docx | image",
+            "fileBase64": "base64_encoded_string"
+        }
+    }
+
+
 @app.post(
     "/api/document-analyze",
     response_model=DocumentAnalyzeResponse,

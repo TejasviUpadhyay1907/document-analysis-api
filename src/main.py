@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.auth import verify_api_key
+from src.config import settings
 from src.extractors.docx_extractor import extract_text_from_docx
 from src.extractors.image_extractor import extract_text_from_image
 from src.extractors.pdf_extractor import extract_text_from_pdf
@@ -60,11 +61,9 @@ async def health_check():
     }
 
 
-@app.post("/", include_in_schema=False)
-async def root_post(request: DocumentAnalyzeRequest, x_api_key: str = Header(..., alias="x-api-key")):
-    """Root POST handler — redirects to main endpoint for compatibility."""
-    if x_api_key != settings.api_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key.")
+@app.post("/", include_in_schema=False, dependencies=[Depends(verify_api_key)])
+async def root_post(request: DocumentAnalyzeRequest):
+    """Root POST handler — delegates to main endpoint for compatibility."""
     return await document_analyze(request)
 
 
